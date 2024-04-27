@@ -1,0 +1,1 @@
+recursive-include wikibot/ *.py *.txt py.typed MANIFEST.in
