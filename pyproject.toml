@@ -33,7 +33,7 @@ namespace_packages = false
 # Uncomment to exclude modules from Mypy.
 [[tool.mypy.overrides]]
 
-module = ["mwclient.*"]
+module = ["mwclient.*", "tavily.*"]
 
 ignore_missing_imports = true
 

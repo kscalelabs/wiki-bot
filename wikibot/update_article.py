@@ -6,117 +6,76 @@ article.
 """
 
 import argparse
+import asyncio
+import json
 import logging
 
 import mwclient
-from openai import OpenAI
+from openai import AsyncOpenAI
+from tavily import TavilyClient
 
-from wikibot.common import SITE_ROOT, get_openai_key, get_password, get_username
+from wikibot.common import SITE_ROOT, get_openai_key, get_password, get_tavily_key, get_username
 from wikibot.logging import configure_logging
 
 logger = logging.getLogger(__name__)
 
-PROMPT = """
-You are a bot tasked with maintaining a public wiki about humanoid robots. Users will give you articles to expand upon,
-and you will use your knowledge and search capabilities to provide accurate and informative expanded content in the
-style of a typical Wikipedia article, with high-quality citations for references.
 
-Our wiki has three main infoboxes that we use:
+async def expand_content_with_gpt(text: str) -> str:
+    openai_client = AsyncOpenAI(api_key=get_openai_key())
+    tavily_client = TavilyClient(api_key=get_tavily_key())
 
-{{infobox company
-| name =
-| country =
-| website_link =
-| robots =
-}}
+    # Creates a new thread with the text as the user message.
+    thread = await openai_client.beta.threads.create()
+    await openai_client.beta.threads.messages.create(thread_id=thread.id, role="user", content=text)
 
-{{infobox robot
-| name =
-| organization =
-| video_link =
-| cost =
-| height =
-| weight =
-| speed =
-| lift_force =
-| battery_life =
-| battery_capacity =
-| purchase_link =
-| number_made =
-| dof =
-| status =
-}}
-
-{{infobox actuator
-| name =
-| manufacturer =
-| cost =
-| purchase_link =
-| nominal_torque =
-| peak_torque =
-| weight =
-| dimensions =
-| gear_ratio =
-| voltage =
-| cad_link =
-| interface =
-| gear_type =
-}}
-
-In the above infoboxes, any field that ends with "link" should be a raw URL.
-
-Conform to the formatting guidelines below when writing articles. Specifically, DO NOT mistakenly use Markdown
-formatting in the article - instead, use vanilla MediaWiki syntax.
-
-- Use `== Headings ==` for section headings.
-- Use `=== Subheadings ===` for subsection headings.
-- Use bullet points for lists, delineated by `*`, `**`, `***`, etc.
-- Use numbered lists for ordered lists, delineated by `#`, `##`, `###`, etc.
-- Use `''Italic text''` for italics.
-- Use `'''Bold text'''` for bold.
-- Use `'''''Bold and italic'''''` for bold and italic.
-- Use `[[Link]]` for internal links.
-- Use `[[Link|Text]]` for piped links.
-- Use `<ref>Reference</ref>` for references.
-- Use `<ref name="Name">Reference</ref>` for named references.
-- Use `<references />` for the references section.
-- Do not use any other templates besides the infoboxes mentioned above.
-
-Please write these articles with the following guidelines in mind:
-
-- Write from a neutral, purely factual point of view.
-- Use proper grammar and spelling.
-- Provide accurate and up-to-date information, with lots of citations.
-- Make sure the article is well-organized and easy to read.
-- Use correct MediaWiki syntax for formatting.
-- Use links to other articles in the wiki where appropriate.
-- Do not add any additional media to the article, but keep any existing media.
-- Avoid adding raw links to the article. Instead, use proper citations. However, only use raw URLs for the infoboxes.
-- For citations, create a "References" section at the end of the article.
-""".strip()
-
-
-def expand_content_with_gpt(text: str, model: str) -> str:
-    client = OpenAI(api_key=get_openai_key())
-    user_prompt = f"Rewrite the following article to be more complete:\n\n```\n{text}\n```"
-    completion = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
+    run = await openai_client.beta.threads.runs.create_and_poll(
+        thread_id=thread.id,
+        assistant_id="asst_wQ4ovFnenUtsLyh6JNQoiuzy",
     )
-    if (content := completion.choices[0].message.content) is None:
-        raise ValueError("Failed to expand content")
-    return content
+
+    while True:
+        if run.status == "failed":
+            raise ValueError("Failed to expand content")
+
+        if run.status == "completed":
+            break
+
+        # Gets the search query.
+        logger.info("Handling action")
+        if (action := run.required_action) is None:
+            raise ValueError("Run requires action")
+
+        tool_outputs = []
+        for tool_call in action.submit_tool_outputs.tool_calls:
+            params = json.loads(tool_call.function.arguments)
+            query = params["query"]
+            search_results = tavily_client.search(query)
+            if not search_results:
+                raise ValueError("No search results found")
+            tool_outputs.append({"output": json.dumps(search_results), "tool_call_id": tool_call.id})
+
+        # Sends the search results to the assistant.
+        await openai_client.beta.threads.runs.submit_tool_outputs(
+            thread_id=thread.id,
+            run_id=run.id,
+            tool_outputs=tool_outputs,  # type: ignore[arg-type]
+        )
+
+        # Polls the run.
+        run = await openai_client.beta.threads.runs.poll(thread_id=thread.id, run_id=run.id)
+
+    # Gets the last message from the assistant.
+    messages = await openai_client.beta.threads.messages.list(thread_id=thread.id, order="desc", limit=1)
+    text_content = next(c for d in messages.data if d.assistant_id is not None for c in d.content if c.type == "text")
+    return text_content.text.value
 
 
-def main() -> None:
+async def main() -> None:
     parser = argparse.ArgumentParser(description="Update articles on the wiki.")
     parser.add_argument("-c", "--category", type=str, default="Stompy, Expand!", help="The category to update.")
-    parser.add_argument("-m", "--model", type=str, default="gpt-4-turbo", help="The OpenAI model to use.")
     parser.add_argument("-d", "--debug", action="store_true", help="Enable debug logging.")
     parser.add_argument("-o", "--one", action="store_true", help="Only update one article.")
+    parser.add_argument("-a", "--accept", action="store_true", help="Prompts the user to accept the changes.")
     args = parser.parse_args()
 
     configure_logging(level=logging.DEBUG if args.debug else logging.INFO)
@@ -143,8 +102,14 @@ def main() -> None:
         content = content.strip()
 
         # Expands the content with GPT.
-        expanded_content = expand_content_with_gpt(content, args.model)
-        logger.debug("Expanded content:\n%s", expanded_content)
+        expanded_content = await expand_content_with_gpt(content)
+        if args.accept:
+            logger.info("Expanded content:\n%s", expanded_content)
+            if input("Accept changes? (y/n): ").strip().lower() != "y":
+                logger.info("Changes not accepted, skipping page")
+                continue
+        else:
+            logger.debug("Expanded content:\n%s", expanded_content)
 
         # Updates the page with the expanded content.
         page.save(expanded_content, summary="Bot expanded article")
@@ -156,4 +121,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     # python -m wikibot.update_article
-    main()
+    asyncio.run(main())

@@ -11,6 +11,12 @@ def get_openai_key() -> str:
     return os.environ["WIKIBOT_OPENAI_API_KEY"]
 
 
+def get_tavily_key() -> str:
+    if "WIKIBOT_TAVILY_API_KEY" not in os.environ:
+        raise ValueError("Tavily API key not found in environment variables.")
+    return os.environ["WIKIBOT_TAVILY_API_KEY"]
+
+
 def get_username() -> str:
     if "WIKIBOT_USERNAME" not in os.environ:
         raise ValueError("Username not found in environment variables.")
