@@ -1,4 +1,6 @@
 # requirements.txt
 
+mwclient
 openai
 requests
+tavily-python

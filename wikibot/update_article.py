@@ -9,6 +9,7 @@ import argparse
 import asyncio
 import json
 import logging
+from typing import Any
 
 import mwclient
 from openai import AsyncOpenAI
@@ -116,6 +117,10 @@ async def main() -> None:
 
         if args.one:
             break
+
+
+def lambda_handler(*args: Any, **kwargs: Any) -> None:  # noqa: ANN401
+    asyncio.run(main())
 
 
 if __name__ == "__main__":
