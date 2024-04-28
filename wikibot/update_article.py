@@ -14,10 +14,12 @@ import mwclient
 from openai import AsyncOpenAI
 from tavily import TavilyClient
 
-from wikibot.common import ASSISTANT_ID, SITE_ROOT, get_openai_key, get_password, get_tavily_key, get_username
+from wikibot.common import SITE_ROOT, get_openai_key, get_password, get_tavily_key, get_username
 from wikibot.logging import configure_logging
 
 logger = logging.getLogger(__name__)
+
+ASSISTANT_ID = "asst_wQ4ovFnenUtsLyh6JNQoiuzy"
 
 
 async def expand_content_with_gpt(text: str) -> str:

@@ -3,7 +3,6 @@
 import os
 
 SITE_ROOT = "humanoids.wiki"
-ASSISTANT_ID = "asst_wQ4ovFnenUtsLyh6JNQoiuzy"
 
 
 def get_openai_key() -> str:
