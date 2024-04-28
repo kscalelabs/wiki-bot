@@ -14,7 +14,7 @@ import mwclient
 from openai import AsyncOpenAI
 from tavily import TavilyClient
 
-from wikibot.common import SITE_ROOT, get_openai_key, get_password, get_tavily_key, get_username
+from wikibot.common import ASSISTANT_ID, SITE_ROOT, get_openai_key, get_password, get_tavily_key, get_username
 from wikibot.logging import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -28,10 +28,7 @@ async def expand_content_with_gpt(text: str) -> str:
     thread = await openai_client.beta.threads.create()
     await openai_client.beta.threads.messages.create(thread_id=thread.id, role="user", content=text)
 
-    run = await openai_client.beta.threads.runs.create_and_poll(
-        thread_id=thread.id,
-        assistant_id="asst_wQ4ovFnenUtsLyh6JNQoiuzy",
-    )
+    run = await openai_client.beta.threads.runs.create_and_poll(thread_id=thread.id, assistant_id=ASSISTANT_ID)
 
     while True:
         if run.status == "failed":
